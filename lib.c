@@ -1,5 +1,7 @@
 #include "./lib.h"
 
+//Los datos sobre el clima siempre son en grados celsius
+
 // Datos del clima
 const char* c_get_weather_data(const char* city) {}
 
