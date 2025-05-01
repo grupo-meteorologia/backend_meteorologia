@@ -1,3 +1,7 @@
+/*!
+ * @file
+ * @brief Implements the C API for weather data retrieval.
+ */
 #include "./lib.h"
 
 //Los datos sobre el clima siempre son en grados celsius
