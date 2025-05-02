@@ -1,8 +1,7 @@
-/*!
- * @file
- * @brief Presentamos el API de C para devolver los datos.\n
- * Los datos sobre el clima siempre son en grados celsius
- */
+/// @file
+/// @brief Presentamos el API de C para devolver los datos.
+/// Los datos sobre el clima siempre son en grados celsius
+
 #include "./lib.h"
 
 
