@@ -1,0 +1,15 @@
+digraph IngestionPipeline {
+  rankdir=LR;
+  node [shape=box, style=filled, fillcolor="#EFEFEF"];
+
+  Fetcher       [label="fetch weather\n(download .nc)"];
+  Decoder       [label="decode nc\n(parse .nc → JSON)"];
+  Storage       [label="Store\n(shared /data)"];
+  Cron          [shape=plaintext, label="⟳ / N minutes"];
+  Archive       [label="Archive\n(timestamped files)"];
+
+  Cron -> Fetcher -> Storage;
+  Fetcher -> Decoder -> Storage;
+  Storage -> Archive [label="historical\ndata"];
+}
+

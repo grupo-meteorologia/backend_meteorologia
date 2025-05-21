@@ -1,0 +1,14 @@
+digraph ServerAPI {
+  rankdir=TB;
+  node [shape=box, style=filled, fillcolor="#EFEFEF"];
+
+  UserClient    [shape=oval, label="Client"];
+  API           [label="weather-api"];
+  Storage       [label="Storage\n/shared/data"];
+  Firewall      [shape=plaintext, label="firewall"];
+
+  UserClient -> Firewall [arrowhead=none];
+  Firewall-> API;
+  API -> Storage;
+}
+
