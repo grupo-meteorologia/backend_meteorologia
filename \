@@ -1,7 +1,6 @@
 #include <curl/curl.h>
 #include <curl/easy.h>
 #include <curl/multi.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -132,10 +131,12 @@ int main(void) {
         return 1;
     }
 
-    utc.tm_hour -= utc.tm_hour % 6;
-
     char prefix_url[512];
     struct tm ctm = {0};
+
+    curl_easy_setopt(master, CURLOPT_URL, prefix_url);
+    curl_easy_setopt(master, CURLOPT_NOBODY, 1L);
+    curl_easy_perform(master);
 
     int year, month, day, hour;
     for (int attempt = 0; attempt < 4; attempt++) {
@@ -148,12 +149,12 @@ int main(void) {
         int h = (ctm.tm_hour / 6) * 6;
 
         snprintf(prefix_url, sizeof(prefix_url),
-                 "https://s3.us-west-2.amazonaws.com/smn-ar-wrf/"
-                 "DATA/WRF/DET/%04d/%02d/%02d/%02d/"
-                 "WRFDETAR_10M_%04d%02d%02d_%02d_000.nc",
+                 "https://s3.us-west-2.amazonaws.com/"
+                 "smn-ar-wrf?list-type=2&prefix=DATA/WRF/DET/%04d/%02d/"
+                 "%02d/%02d/WRFDETAR_10M_%04d%02d%02d_%02d_000.nc",
                  y, m, d, h, y, m, d, h);
 
-        curl_easy_setopt(master, CURLOPT_NOBODY, 1L);
+        curl_easy_setopt(master, CURLOPT_NOBODY, 0L);
         curl_easy_setopt(master, CURLOPT_URL, prefix_url);
         if (curl_easy_perform(master) != CURLE_OK) {
             fprintf(stderr, "Error fetching list\n");
@@ -164,7 +165,6 @@ int main(void) {
         curl_easy_getinfo(master, CURLINFO_RESPONSE_CODE, &code);
 
         if (code == 200) {
-            chosen_time = cand;
             year = y;
             month = m;
             day = d;
@@ -173,35 +173,11 @@ int main(void) {
         }
     }
 
-    if (chosen_time == 0) {
-        fprintf(stderr, "No valid run found in the last 24 h\n");
-        curl_easy_cleanup(master);
-        return 1;
-    }
+    time_t latest = 0;
+    char latest_key[512] = {0};
 
-    double dt = difftime(now, chosen_time);
-
-    int off10m = (int)round(dt / (60 * 60.0));
-    int off1h = (int)round(dt / (60 * 60.0));
-    int off24h = (int)round(dt / (24 * 60 * 60.0));
-
-    printf("off10m = %d\noff1h = %d\noff24h = %d\n", off10m, off1h, off24h);
-
-    char k10m[512] = {0}, k1h[512] = {0}, k24h[512] = {0};
-    snprintf(k10m, sizeof(k10m),
-             "DATA/WRF/DET/%04d/%02d/%02d/%02d/"
-             "WRFDETAR_10M_%04d%02d%02d_%02d_%03d.nc",
-             year, month, day, hour, year, month, day, hour, off10m);
-
-    snprintf(k1h, sizeof(k1h),
-             "DATA/WRF/DET/%04d/%02d/%02d/%02d/"
-             "WRFDETAR_01H_%04d%02d%02d_%02d_%03d.nc",
-             year, month, day, hour, year, month, day, hour, off1h);
-
-    snprintf(k24h, sizeof(k24h),
-             "DATA/WRF/DET/%04d/%02d/%02d/%02d/"
-             "WRFDETAR_24H_%04d%02d%02d_%02d_%03d.nc",
-             year, month, day, hour, year, month, day, hour, off24h);
+    time_t t10m = 0, t1h = 0, t24h = 0;
+    char *p = mem.buf, k10m[512] = {0}, k1h[512] = {0}, k24h[512] = {0};
 
     const char *keys[3] = {k10m, k1h, k24h};
 
@@ -210,6 +186,9 @@ int main(void) {
         curl_easy_cleanup(master);
         return 1;
     }
+
+    printf("Newest .nc are:\n\tk10m => %s\n\tk1h => %s\n\tk24h => %s\n",
+           keys[0], keys[1], keys[2]);
 
     download_parallel(master, keys);
 
