@@ -4,7 +4,6 @@
 
 #include "./lib.h"
 
-
 /// Datos del clima
 const char* c_get_weather_data(const char* city) {}
 
@@ -19,4 +18,3 @@ float c_get_humidity(const char* city) {}
 
 /// Obtener viento
 float c_get_wind_speed(const char* city) {}
-
