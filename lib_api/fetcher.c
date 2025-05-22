@@ -1,21 +1,45 @@
-#include <curl/curl.h>
-#include <curl/easy.h>
-#include <curl/multi.h>
-#include <math.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <time.h>
+#include "./fetcher.h"
 
-#define RAW_DIR "data/raw/"
-#define NUM_FILES 3
-#define MAX_URL 1024
+#include <curl/system.h>
 
-static int find_latest_run(CURL *master, struct tm *out) {
-    if (!master) return 1;
+static CURL *master = NULL;
 
+struct progress {
+    curl_off_t now, total;
+} progs[NUM_FILES];
+
+struct cbdata {
+    int idx;
+};
+
+void redraw_bars() {
+    printf("\x1b[%dA", NUM_FILES);
+    for (int i = 0; i < NUM_FILES; i++) {
+        curl_off_t dlnow = progs[i].now;
+        curl_off_t dltotal = progs[i].total;
+
+        int pct = dltotal > 0 ? (int)(dlnow * 100 / dltotal) : 0;
+        int filled = pct * WIDTH / 100;
+
+        fprintf(stderr, "[%02d] [", i);
+        for (int j = 0; j < WIDTH; j++) fputc(j < filled ? '#' : ' ', stderr);
+        fprintf(stderr, "] %3d%%\n", pct);
+    }
+    fflush(stdout);
+}
+
+static int progress_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
+                       curl_off_t ultotal, curl_off_t ulnow) {
+    struct cbdata *d = p;
+    progs[d->idx].now = dlnow;
+    progs[d->idx].total = dltotal;
+
+    redraw_bars();
+
+    return 0;
+}
+
+static int find_latest_run(struct tm *out) {
     time_t now = time(NULL);
 
     for (int i = 0; i < 4; i++) {
@@ -40,7 +64,6 @@ static int find_latest_run(CURL *master, struct tm *out) {
         curl_easy_setopt(master, CURLOPT_FOLLOWLOCATION, 1L);
 
         if (curl_easy_perform(master) != CURLE_OK) {
-            curl_easy_cleanup(master);
             return 1;
         }
         long code = 0;
@@ -74,83 +97,117 @@ static void generate_keys(const struct tm *run, int offset[NUM_FILES],
     }
 }
 
-int download_parallel(CURL *master, const char keys[NUM_FILES][MAX_URL]) {
+int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
     CURLM *multi = curl_multi_init();
     if (!multi) return 1;
 
     CURL *handles[NUM_FILES] = {0};
     FILE *files[NUM_FILES] = {0};
 
-    int still_running = 0;
-    char url[MAX_URL] = {0}, outpath[NUM_FILES][MAX_URL] = {{0}};
+    char url[NUM_FILES][MAX_URL] = {{0}}, outpath[NUM_FILES][MAX_URL] = {{0}};
 
-    for (int i = 0; i < 3; i++) {
-        const char *fn = strrchr(keys[i], '/');
-        fn = fn ? fn + 1 : keys[i];
-        snprintf(url, sizeof(url),
-                 "https://smn-ar-wrf.s3.us-west-2.amazonaws.com/%s", keys[i]);
-        snprintf(outpath[i], sizeof(outpath), RAW_DIR "%s", fn);
+    for (int i = 0; i < NUM_FILES; i++) {
+        const char *fn =
+            construct_file_name((char *)keys[i], url[i], outpath[i]);
 
-        struct stat st;
-        time_t mtime = 0;
-        if (stat(outpath[i], &st) == 0) mtime = st.st_mtime;
-        files[i] = fopen(outpath[i], "wb");
-        if (!files[i]) {
-            perror("outpath");
+        void *st_unsafe = check_time(&files[i], outpath[i]);
+        if (st_unsafe == NULL) {
             continue;
         }
+        struct stat *st = st_unsafe;
 
         handles[i] = curl_easy_duphandle(master);
-        curl_easy_setopt(handles[i], CURLOPT_URL, url);
+        curl_easy_setopt(handles[i], CURLOPT_URL, url[i]);
         curl_easy_setopt(handles[i], CURLOPT_WRITEFUNCTION, NULL);
         curl_easy_setopt(handles[i], CURLOPT_WRITEDATA, files[i]);
 
-        if (mtime != 0) {
+        if (st->st_mtime != 0) {
             curl_easy_setopt(handles[i], CURLOPT_TIMECONDITION,
                              CURL_TIMECOND_IFMODSINCE);
-            curl_easy_setopt(handles[i], CURLOPT_TIMEVALUE, (long)st.st_mtime);
+            curl_easy_setopt(handles[i], CURLOPT_TIMEVALUE, (long)st->st_mtime);
         }
+        free(st);
+
+        struct cbdata *d = malloc(sizeof *d);
+        d->idx = i;
+        curl_easy_setopt(handles[i], CURLOPT_XFERINFOFUNCTION, progress_cb);
+        curl_easy_setopt(handles[i], CURLOPT_XFERINFODATA, d);
+        curl_easy_setopt(handles[i], CURLOPT_NOPROGRESS, 0L);
 
         curl_multi_add_handle(multi, handles[i]);
-    }
 
-    curl_multi_perform(multi, &still_running);
-    while (still_running) {
-        int numfds;
-        curl_multi_wait(multi, NULL, 0, 1000, &numfds);
-        curl_multi_perform(multi, &still_running);
+        progs[i].now = progs[i].total = 0;
     }
+    fflush(stdout);
+
+    multi_perform(multi);
 
     for (int i = 0; i < NUM_FILES; i++) {
-        if (!handles[i]) continue;
-
-        long code = 0;
-        curl_easy_getinfo(handles[i], CURLINFO_RESPONSE_CODE, &code);
-
-        if (code == 200) {
-            printf("Downloaded %s (HTTP %ld)\n", outpath[i], code);
-        } else if (code == 304) {
-            printf("%s not modified. Skipped.\n", outpath[i]);
-        } else {
-            printf("Downloaded %s (HTTP %ld)\n", outpath[i], code);
-        }
+        if (check_response(handles[i], outpath[i], files[i])) continue;
 
         curl_multi_remove_handle(multi, handles[i]);
         curl_easy_cleanup(handles[i]);
-        fclose(files[i]);
     }
 
     curl_multi_cleanup(multi);
     return 0;
 }
 
-int main(void) {
-    CURL *master = curl_easy_init();
-    if (!master) {
-        fprintf(stderr, "libcurl init failed\n");
-        return 1;
-    }
+const char *construct_file_name(const char *key, char url[MAX_URL],
+                                char outpath[MAX_URL]) {
+    const char *fn = strrchr(key, '/');
+    fn = fn ? fn + 1 : key;
+    snprintf(url, MAX_URL, "https://smn-ar-wrf.s3.us-west-2.amazonaws.com/%s",
+             key);
+    snprintf(outpath, MAX_URL, RAW_DIR "%s", fn);
 
+    return fn;
+}
+
+void *check_time(FILE **file, char outpath[MAX_URL]) {
+    struct stat *st = malloc(sizeof(struct stat));
+    if (stat(outpath, st) != 0) st->st_mtime = 0;
+    *file = fopen(outpath, "wb");
+    if (!*file) {
+        perror("outpath");
+        free(st);
+        return NULL;
+    }
+    return st;
+}
+
+void multi_perform(CURLM *multi) {
+    int still_running = 0;
+
+    curl_multi_perform(multi, &still_running);
+
+    while (still_running) {
+        curl_multi_wait(multi, NULL, 0, 1000, NULL);
+        curl_multi_perform(multi, &still_running);
+    }
+}
+
+int check_response(CURL *handle, char outpath[MAX_URL], FILE *file) {
+    if (!handle) return 1;
+    long code = 0;
+    curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
+
+    if (code == 200) {
+        printf("Downloaded %s (HTTP %ld)\n", outpath, code);
+    } else if (code == 304) {
+        printf("%s not modified. Skipped.\n", outpath);
+    } else {
+        printf("Downloaded %s (HTTP %ld)\n", outpath, code);
+    }
+    fclose(file);
+    return 0;
+}
+
+void set_master() {
+    curl_easy_reset(master);
+
+    curl_easy_setopt(master, CURLOPT_NOBODY, 0L);
+    curl_easy_setopt(master, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(master, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(master, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(master, CURLOPT_SSL_SESSIONID_CACHE, 1L);
@@ -158,13 +215,28 @@ int main(void) {
     curl_easy_setopt(master, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(master, CURLOPT_TCP_KEEPIDLE, 120L);
     curl_easy_setopt(master, CURLOPT_TCP_KEEPINTVL, 60L);
+}
 
-    struct tm run_tm;
-    if (find_latest_run(master, &run_tm) != 0) {
-        fprintf(stderr, "No valid run in the last 24H\n");
-        curl_easy_cleanup(master);
+int main(void) {
+    curl_global_init(CURL_GLOBAL_ALL);
+
+    master = curl_easy_init();
+    if (!master) {
+        fprintf(stderr, "libcurl init failed\n");
         return 1;
     }
+
+    set_master();
+
+    struct tm run_tm;
+    if (find_latest_run(&run_tm) != 0) {
+        fprintf(stderr, "No valid run in the last 24H\n");
+        curl_easy_cleanup(master);
+        curl_global_cleanup();
+        return 1;
+    }
+
+    set_master();
 
     time_t now = time(NULL);
     time_t run_time = timegm(&run_tm);
@@ -178,11 +250,13 @@ int main(void) {
     if (!keys[0][0] || !keys[1][0] || !keys[2][0]) {
         fprintf(stderr, "Missing one of 10M, 01H, 24H keys\n");
         curl_easy_cleanup(master);
+        curl_global_cleanup();
         return 1;
     }
 
-    download_parallel(master, keys);
+    download_parallel(keys);
 
     curl_easy_cleanup(master);
+    curl_global_cleanup();
     return 0;
 }
