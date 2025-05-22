@@ -142,33 +142,33 @@ void convert_nc_to_json(const char *inpath, const char *outpath) {
             free(data);
         }
 
-        /* --- variable attributes --- */
-        cJSON *vatt_arr = cJSON_CreateArray();
-        for (int a = 0; a < natt; a++) {
-            char attn[NC_MAX_NAME + 1];
-            nc_type atype;
-            size_t alen;
-            NC_CHECK(nc_inq_attname(ncid, v, a, attn));
-            NC_CHECK(nc_inq_att(ncid, v, attn, &atype, &alen));
-
-            cJSON *ao = cJSON_CreateObject();
-            cJSON_AddStringToObject(ao, "name", attn);
-            if (atype == NC_CHAR) {
-                char *buf = malloc(alen + 1);
-                NC_CHECK(nc_get_att_text(ncid, v, attn, buf));
-                buf[alen] = '\0';
-                cJSON_AddStringToObject(ao, "value", buf);
-                free(buf);
-            } else {
-                double vv;
-                NC_CHECK(nc_get_att_double(ncid, v, attn, &vv));
-                cJSON_AddNumberToObject(ao, "value", vv);
-            }
-            cJSON_AddItemToArray(vatt_arr, ao);
-        }
-        cJSON_AddItemToObject(vobj, "attributes", vatt_arr);
-
-        cJSON_AddItemToArray(vars_arr, vobj);
+        // /* --- variable attributes --- */
+        // cJSON *vatt_arr = cJSON_CreateArray();
+        // for (int a = 0; a < natt; a++) {
+        //     char attn[NC_MAX_NAME + 1];
+        //     nc_type atype;
+        //     size_t alen;
+        //     NC_CHECK(nc_inq_attname(ncid, v, a, attn));
+        //     NC_CHECK(nc_inq_att(ncid, v, attn, &atype, &alen));
+        //
+        //     cJSON *ao = cJSON_CreateObject();
+        //     cJSON_AddStringToObject(ao, "name", attn);
+        //     if (atype == NC_CHAR) {
+        //         char *buf = malloc(alen + 1);
+        //         NC_CHECK(nc_get_att_text(ncid, v, attn, buf));
+        //         buf[alen] = '\0';
+        //         cJSON_AddStringToObject(ao, "value", buf);
+        //         free(buf);
+        //     } else {
+        //         double vv;
+        //         NC_CHECK(nc_get_att_double(ncid, v, attn, &vv));
+        //         cJSON_AddNumberToObject(ao, "value", vv);
+        //     }
+        //     cJSON_AddItemToArray(vatt_arr, ao);
+        // }
+        // cJSON_AddItemToObject(vobj, "attributes", vatt_arr);
+        //
+        // cJSON_AddItemToArray(vars_arr, vobj);
     }
     cJSON_AddItemToObject(root, "variables", vars_arr);
 
