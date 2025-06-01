@@ -1,0 +1,15 @@
+services:
+  server:
+    build: ./server
+    volumes:
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ingestor
+
+  ingestor:
+    build: ./ingestor
+    volumes:
+      - ./data:/data
+    command: ["./ingestor"]

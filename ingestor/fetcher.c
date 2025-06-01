@@ -1,8 +1,6 @@
-#include "./fetcher.h"
+#include "fetcher.h"
 
-#include <curl/system.h>
-
-static CURL *master = NULL;
+#include <curl/easy.h>
 
 struct progress {
     curl_off_t now, total;
@@ -11,6 +9,42 @@ struct progress {
 struct cbdata {
     int idx;
 };
+
+int fetch_current_conditions(double lat, double lon, char *out_path,
+                             size_t out_path_size) {
+    CURL *handle = curl_easy_init();
+    if (!handle) return 1;
+
+    char url[512];
+    snprintf(url, sizeof(url),
+             "https://api.open-meteo.com/v1/"
+             "forecast?latitude=%.2f&longitude=%.2f&current_weather=true",
+             lat, lon);
+
+    snprintf(out_path, out_path_size, LIVE_DIR "%.2f_%.2f.json", lat, lon);
+    FILE *fp = fopen(out_path, "w");
+    if (!fp) {
+        perror("fopen");
+        return 1;
+    }
+
+    curl_easy_setopt(handle, CURLOPT_URL, url);
+    curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(handle, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, NULL);
+
+    CURLcode res = curl_easy_perform(handle);
+    fclose(fp);
+    curl_easy_cleanup(handle);
+
+    if (res != CURLE_OK) {
+        fprintf(stderr, "curl_easy_perform failed: %s\n",
+                curl_easy_strerror(res));
+        return 1;
+    }
+
+    return 0;
+}
 
 void redraw_bars() {
     printf("\x1b[%dA", NUM_FILES);
@@ -28,8 +62,8 @@ void redraw_bars() {
     fflush(stdout);
 }
 
-static int progress_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
-                       curl_off_t ultotal, curl_off_t ulnow) {
+int progress_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
+                curl_off_t ultotal, curl_off_t ulnow) {
     struct cbdata *d = p;
     progs[d->idx].now = dlnow;
     progs[d->idx].total = dltotal;
@@ -39,7 +73,7 @@ static int progress_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
     return 0;
 }
 
-static int find_latest_run(struct tm *out) {
+int find_latest_run(struct tm *out) {
     time_t now = time(NULL);
 
     for (int i = 0; i < 4; i++) {
@@ -77,8 +111,8 @@ static int find_latest_run(struct tm *out) {
     return 1;
 }
 
-static void generate_keys(const struct tm *run, int offset[NUM_FILES],
-                          char keys[NUM_FILES][MAX_URL]) {
+void generate_keys(const struct tm *run, int offset[NUM_FILES],
+                   char keys[NUM_FILES][MAX_URL]) {
     const char *templates[NUM_FILES] = {
         "DATA/WRF/DET/%04d/%02d/%02d/%02d/"
         "WRFDETAR_10M_%04d%02d%02d_%02d_%03d.nc",
@@ -95,6 +129,16 @@ static void generate_keys(const struct tm *run, int offset[NUM_FILES],
         snprintf(keys[i], MAX_URL, templates[i], year, mon, day, hour, year,
                  mon, day, hour, offset[i]);
     }
+}
+
+bool run_already_downloaded(struct tm *run_tm) {
+    char path[MAX_URL];
+    snprintf(path, sizeof(path),
+             RAW_DIR "WRFDETAR_10M_%04d%02d%02d_%02d_000.nc",
+             run_tm->tm_year + 1900, run_tm->tm_mon + 1, run_tm->tm_mday,
+             run_tm->tm_hour);
+
+    return access(path, F_OK) == 0;
 }
 
 int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
@@ -215,48 +259,4 @@ void set_master() {
     curl_easy_setopt(master, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(master, CURLOPT_TCP_KEEPIDLE, 120L);
     curl_easy_setopt(master, CURLOPT_TCP_KEEPINTVL, 60L);
-}
-
-int main(void) {
-    curl_global_init(CURL_GLOBAL_ALL);
-
-    master = curl_easy_init();
-    if (!master) {
-        fprintf(stderr, "libcurl init failed\n");
-        return 1;
-    }
-
-    set_master();
-
-    struct tm run_tm;
-    if (find_latest_run(&run_tm) != 0) {
-        fprintf(stderr, "No valid run in the last 24H\n");
-        curl_easy_cleanup(master);
-        curl_global_cleanup();
-        return 1;
-    }
-
-    set_master();
-
-    time_t now = time(NULL);
-    time_t run_time = timegm(&run_tm);
-    double hours = difftime(now, run_time) / 3600;
-    int offsets[NUM_FILES] = {(int)round(hours), (int)round(hours),
-                              (int)round(hours / 24)};
-
-    char keys[NUM_FILES][MAX_URL] = {{0}};
-    generate_keys(&run_tm, offsets, keys);
-
-    if (!keys[0][0] || !keys[1][0] || !keys[2][0]) {
-        fprintf(stderr, "Missing one of 10M, 01H, 24H keys\n");
-        curl_easy_cleanup(master);
-        curl_global_cleanup();
-        return 1;
-    }
-
-    download_parallel(keys);
-
-    curl_easy_cleanup(master);
-    curl_global_cleanup();
-    return 0;
 }
