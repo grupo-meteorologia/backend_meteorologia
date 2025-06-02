@@ -16,7 +16,7 @@
 
 #include "constants.h"
 
-static CURL *master = NULL;
+extern CURL *master;
 
 int find_latest_run(struct tm *out);
 

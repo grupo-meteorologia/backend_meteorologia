@@ -9,6 +9,7 @@
 #include "parser.h"
 
 int current_data_sql() {
+    fprintf(stderr, "[DEBUG] current_data_sql\n");
     sqlite3* db;
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) return 1;
 
@@ -46,7 +47,7 @@ int current_data_sql() {
             sqlite3_step(update);
             sqlite3_finalize(update);
         }
-        printf("Fetched current weather conditions.");
+        fprintf(stderr, "[DEBUG] Fetched current weather conditions.\n");
     }
 
     if (rc != SQLITE_DONE) {
@@ -65,6 +66,7 @@ int current_data_sql() {
 
 static void sqlite_update_hook(void* p_user_data, int op, const char* db_name,
                                const char* table_name, sqlite3_int64 id) {
+    fprintf(stderr, "[DEBUG] sqlite_update_hook\n");
     if (op != SQLITE_UPDATE) return;
     if (strcmp(table_name, "missing_requests") != 0) return;
 
@@ -128,13 +130,15 @@ static void sqlite_update_hook(void* p_user_data, int op, const char* db_name,
 }
 
 void* fetcher_thread(void* _) {
+    fprintf(stderr, "[DEBUG] fetcher_thread\n");
     curl_global_init(CURL_GLOBAL_ALL);
 
     master = curl_easy_init();
     if (!master) {
-        fprintf(stderr, "libcurl init failed\n");
+        fprintf(stderr, "[ERROR] libcurl init failed\n");
         return NULL;
     }
+    fprintf(stderr, "[DEBUG] Master global is not NULL\n");
 
     set_master();
 
@@ -146,7 +150,13 @@ void* fetcher_thread(void* _) {
         }
 
         struct tm run_tm;
-        if (find_latest_run(&run_tm) != 0 || run_already_downloaded(&run_tm)) {
+        int rc_1 = find_latest_run(&run_tm);
+        int rc_2 = run_already_downloaded(&run_tm);
+        if (rc_1 != 0 || rc_2) {
+            fprintf(stderr,
+                    "[DEBUG] Fetcher sleeping\n\tfind_latest_run(&run_tm) = "
+                    "%d\n\trun_already_downloaded = %d\n",
+                    rc_1, rc_2);
             sleep(60);
             continue;
         }
@@ -165,6 +175,7 @@ void* fetcher_thread(void* _) {
 }
 
 void* parser_thread(void* _) {
+    fprintf(stderr, "[DEBUG] parser_thread\n");
     sqlite3* db;
     if (sqlite3_open_v2(DB_PATH, &db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
@@ -213,6 +224,7 @@ void* parser_thread(void* _) {
 }
 
 void* db_thread(void* _) {
+    fprintf(stderr, "[DEBUG] db_thread\n");
     sqlite3* db = NULL;
     if (sqlite3_open_v2(DB_PATH, &db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
@@ -232,66 +244,76 @@ void* db_thread(void* _) {
 }
 
 int main(void) {
+    fprintf(stderr, "[DEBUG] === entering main() ===\n");
+    fflush(stderr);
     pthread_t t_fetcher, t_parser, t_db;
+
+    fprintf(stderr, "[DEBUG] Alo\n");
 
     pthread_create(&t_fetcher, NULL, fetcher_thread, NULL);
     pthread_create(&t_parser, NULL, parser_thread, NULL);
     pthread_create(&t_db, NULL, db_thread, NULL);
 
-    struct tm run_tm;
-    if (find_latest_run(&run_tm) != 0) {
-        fprintf(stderr, "No valid run in the last 24H\n");
-        curl_easy_cleanup(master);
-        curl_global_cleanup();
-        return 1;
-    }
+    fprintf(stderr, "[DEBUG] Threads opened\n");
 
-    set_master();
+    pthread_join(t_fetcher, NULL);
+    pthread_join(t_parser, NULL);
+    pthread_join(t_db, NULL);
 
-    time_t now = time(NULL);
-    time_t run_time = timegm(&run_tm);
-    double hours = difftime(now, run_time) / 3600;
-    int offsets[NUM_FILES] = {(int)round(hours), (int)round(hours),
-                              (int)round(hours / 24)};
-
-    char keys[NUM_FILES][MAX_URL] = {{0}};
-    generate_keys(&run_tm, offsets, keys);
-
-    if (!keys[0][0] || !keys[1][0] || !keys[2][0]) {
-        fprintf(stderr, "Missing one of 10M, 01H, 24H keys\n");
-        curl_easy_cleanup(master);
-        curl_global_cleanup();
-        return 1;
-    }
-
-    download_parallel(keys);
-
-    curl_easy_cleanup(master);
-    curl_global_cleanup();
-
-    sqlite3* db;
-    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
-        fprintf(stderr, "Error opening DB: %s\n", sqlite3_errmsg(db));
-        return 1;
-    }
-
-    sqlite3_stmt* stmt;
-    const char* sql = "SELECT lat, lon FROM missing_requests;";
-    if (sqlite3_prepare_v3(db, sql, -1, 0, &stmt, NULL) != SQLITE_OK) {
-        fprintf(stderr, "Error preparing SELECT: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
-        return 1;
-    }
-
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        double lat = sqlite3_column_double(stmt, 0);
-        double lon = sqlite3_column_double(stmt, 1);
-
-        printf("Procesando lat=%.2f, lon=%.2f\n", lat, lon);
-    }
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
+    // struct tm run_tm;
+    // if (find_latest_run(&run_tm) != 0) {
+    //     fprintf(stderr, "No valid run in the last 24H\n");
+    //     curl_easy_cleanup(master);
+    //     curl_global_cleanup();
+    //     return 1;
+    // }
+    //
+    // set_master();
+    //
+    // time_t now = time(NULL);
+    // time_t run_time = timegm(&run_tm);
+    // double hours = difftime(now, run_time) / 3600;
+    // int offsets[NUM_FILES] = {(int)round(hours), (int)round(hours),
+    //                           (int)round(hours / 24)};
+    //
+    // char keys[NUM_FILES][MAX_URL] = {{0}};
+    // generate_keys(&run_tm, offsets, keys);
+    //
+    // if (!keys[0][0] || !keys[1][0] || !keys[2][0]) {
+    //     fprintf(stderr, "Missing one of 10M, 01H, 24H keys\n");
+    //     curl_easy_cleanup(master);
+    //     curl_global_cleanup();
+    //     return 1;
+    // }
+    //
+    // download_parallel(keys);
+    //
+    // curl_easy_cleanup(master);
+    // curl_global_cleanup();
+    //
+    // sqlite3* db;
+    // if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+    //     fprintf(stderr, "Error opening DB: %s\n", sqlite3_errmsg(db));
+    //     return 1;
+    // }
+    //
+    // sqlite3_stmt* stmt;
+    // const char* sql = "SELECT lat, lon FROM missing_requests;";
+    // if (sqlite3_prepare_v3(db, sql, -1, 0, &stmt, NULL) != SQLITE_OK) {
+    //     fprintf(stderr, "Error preparing SELECT: %s\n", sqlite3_errmsg(db));
+    //     sqlite3_close(db);
+    //     return 1;
+    // }
+    //
+    // while (sqlite3_step(stmt) == SQLITE_ROW) {
+    //     double lat = sqlite3_column_double(stmt, 0);
+    //     double lon = sqlite3_column_double(stmt, 1);
+    //
+    //     printf("Procesando lat=%.2f, lon=%.2f\n", lat, lon);
+    // }
+    //
+    // sqlite3_finalize(stmt);
+    // sqlite3_close(db);
 
     return 0;
 }

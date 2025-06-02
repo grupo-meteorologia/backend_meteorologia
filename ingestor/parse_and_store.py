@@ -7,9 +7,9 @@ import os
 from netCDF4 import Dataset
 import numpy as np
 
-DB_PATH = "data/dev.db"
-RAW_DIR = "data/raw/netcdf/"
-LIVE_DIR = "data/raw/live/"
+DB_PATH = "/data/dev.db"
+RAW_DIR = "/data/raw/netcdf/"
+LIVE_DIR = "/data/raw/live/"
 
 VAR_SPECS = {
     "T2":         {"source": "01H", "key": "temperature",     "tolerance": 300},

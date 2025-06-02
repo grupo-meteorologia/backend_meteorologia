@@ -5,8 +5,8 @@ FROM gcc
 WORKDIR /app
 COPY . .
 
-RUN apt-get update && \
-    apt-get install -y libsqlite3-dev && \
-    gcc -o server main.c -lpthread -lsqlite3 -ldl -lm
+RUN apt-get update
+RUN apt-get install -y libsqlite3-dev
+RUN gcc -o server main.c mongoose.c -lpthread -lsqlite3 -ldl -lm
 
 CMD ["./server"]

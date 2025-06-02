@@ -2,10 +2,15 @@
 /// @brief Presentamos el API de C para devolver los datos.
 /// Los datos sobre el clima siempre son en grados celsius
 
-#include <stdio.h>
-#include <stdlib.h>
+#include "./main.h"
 
-#include "./server.h"
+#include <sqlite3.h>
+#include <stdio.h>
+
+static const char* KEYS[] = {"temperature",    "humidity", "wind_speed",
+                             "wind_direction", "pressure", "temp_max",
+                             "temp_min"};
+static const int NUM_KEYS = sizeof(KEYS) / sizeof(KEYS[0]);
 
 static void send_json(struct mg_connection* c, const char* json) {
     mg_printf(c,
@@ -36,14 +41,8 @@ static void handle_request(struct mg_connection* c, int ev, void* ev_data) {
     double lat = atof(lat_buf);
     double lon = atof(lon_buf);
 
-    if (strcmp(type, "temperature") == 0) {
-        response = c_get_temperature(lat, lon);
-    } else if (strcmp(type, "humidity") == 0) {
-        response = c_get_humidity(lat, lon);
-    } else if (strcmp(type, "wind") == 0) {
-        response = c_get_wind_speed(lat, lon);
-    } else if (strcmp(type, "forecast") == 0) {
-        response = c_get_forecast(lat, lon);
+    if (strlen(type) == 0) {
+        response = c_get_weather_var(lat, lon, type);
     } else {
         response = c_get_weather_data(lat, lon);
     }
@@ -51,37 +50,140 @@ static void handle_request(struct mg_connection* c, int ev, void* ev_data) {
     send_json(c, response);
 }
 
+int insert_into_missing(double lat, double lon, sqlite3* db) {
+    const char* query =
+        "INSERT OR IGNORE INTO missing_requests (lat, lon) VALUES (?, ?);";
+
+    sqlite3_stmt* stmt = NULL;
+
+    if (sqlite3_prepare_v3(db, query, -1, 0, &stmt, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Couldn't prepare db");
+        return 1;
+    }
+
+    sqlite3_bind_double(stmt, 1, lat);
+    sqlite3_bind_double(stmt, 2, lon);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    return 0;
+}
+
 /// Datos del clima
-const char* c_get_weather_data(double lat, double lon) {}
+const char* c_get_weather_data(double lat, double lon) {
+    static char json[512];
 
-/// Meteorologo semanal
-const char* c_get_forecast(double lat, double lon) {}
+    sqlite3* db = NULL;
+    sqlite3_stmt* stmt = NULL;
 
-/// Obtener Temperatura
-const char* c_get_temperature(double lat, double lon) {
-    static char path[128];
-    snprintf(path, sizeof(path), "data/json/%.2f_%.2f.json", lat, lon);
+    const char* query =
+        "SELECT value FROM weather WHERE variable = ? AND "
+        "ABS(lat-?) < 0.01 AND ABS(lon-?) < 0.01 ORDER BY timestamp DESC LIMIT "
+        "1;";
 
-    FILE* f = fopen(path, "r");
-    if (!f) return "{\'error\': \"No hay datos para esa ubicación\"}";
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        snprintf(json, sizeof(json),
+                 "{\"error\":\"No se pudo abrir la base de datos\"}");
+        return json;
+    }
 
-    static char json[4096];
-    fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
+    int pos = 0;
+    pos += snprintf(json + pos, sizeof(json) - pos, "{");
+
+    int found_any = 0;
+    for (int i = 0; i < NUM_KEYS; i++) {
+        const char* var = KEYS[i];
+        double value = 0.0;
+
+        if (sqlite3_prepare_v3(db, query, -1, 0, &stmt, NULL) != SQLITE_OK) {
+            sqlite3_close(db);
+            snprintf(json, sizeof(json),
+                     "{\"error\": \"Error al preparar la consulta interna\"}");
+            return json;
+        }
+
+        sqlite3_bind_text(stmt, 1, var, -1, SQLITE_STATIC);
+        sqlite3_bind_double(stmt, 2, lat);
+        sqlite3_bind_double(stmt, 3, lon);
+
+        if (sqlite3_step(stmt) != SQLITE_ROW) {
+            fprintf(stderr, "No hay datos en db para lat %.2f y lon %.2f", lat,
+                    lon);
+            insert_into_missing(lat, lon, db);
+            sqlite3_finalize(stmt);
+            continue;
+        }
+
+        value = sqlite3_column_double(stmt, 0);
+
+        sqlite3_finalize(stmt);
+
+        if (found_any) {
+            pos += snprintf(json + pos, sizeof(json) - pos, ", ");
+        }
+        pos += snprintf(json + pos, sizeof(json) - pos, "\"%s\": %.2f", var,
+                        value);
+
+        found_any = 1;
+    }
+
+    sqlite3_close(db);
+
+    if (!found_any) {
+        snprintf(json, sizeof(json),
+                 "{\"error\":\"No hay datos para esa ubicación\"}");
+        return json;
+    }
+
+    pos += snprintf(json + pos, sizeof(json) - pos, "}");
     return json;
 }
 
-/// Obtener humedad
-const char* c_get_humidity(double lat, double lon) {}
+/// Obtener Temperatura
+const char* c_get_weather_var(double lat, double lon, char* var) {
+    static char json[128];
+    sqlite3* db = NULL;
+    sqlite3_stmt* stmt = NULL;
 
-/// Obtener viento
-const char* c_get_wind_speed(double lat, double lon) {}
+    const char* query =
+        "SELECT value FROM weather WHERE variable = ? AND "
+        "ABS(lat-?) < 0.01 AND ABS(lon-?) < 0.01 ORDER BY timestamp DESC LIMIT "
+        "1;";
+
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        return "{\"ERROR\": \"No se pudo abrir la base de datos.\"}";
+    }
+
+    if (sqlite3_prepare_v3(db, query, -1, 0, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return "{\"ERROR\": \"Error al preparar la consulta.\"}";
+    }
+
+    sqlite3_bind_text(stmt, 1, var, strlen(var), SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 2, lat);
+    sqlite3_bind_double(stmt, 3, lon);
+
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        snprintf(json, sizeof(json),
+                 "{\"error\":\"No hay datos de %s para lat %.2f y lon %.2f\"}",
+                 var, lat, lon);
+        insert_into_missing(lat, lon, db);
+        return json;
+    }
+
+    double val = sqlite3_column_double(stmt, 0);
+    snprintf(json, sizeof(json), "{\"%s\": %.2f}", var, val);
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return json;
+}
 
 int main(void) {
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
-    mg_http_listen(&mgr, "http://localhost:8000", handle_request, NULL);
-    printf("Listening to localhost 8000");
+    mg_http_listen(&mgr, "http://0.0.0.0:" PORT, handle_request, NULL);
+    printf("Listening to 8000");
 
     while (1) {
         mg_mgr_poll(&mgr, 1000);

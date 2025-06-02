@@ -1,6 +1,6 @@
 #include "fetcher.h"
 
-#include <curl/easy.h>
+CURL *master = NULL;
 
 struct progress {
     curl_off_t now, total;
@@ -12,6 +12,7 @@ struct cbdata {
 
 int fetch_current_conditions(double lat, double lon, char *out_path,
                              size_t out_path_size) {
+    fprintf(stderr, "[DEBUG] fetch_current_conditions\n");
     CURL *handle = curl_easy_init();
     if (!handle) return 1;
 
@@ -46,37 +47,41 @@ int fetch_current_conditions(double lat, double lon, char *out_path,
     return 0;
 }
 
-void redraw_bars() {
-    printf("\x1b[%dA", NUM_FILES);
-    for (int i = 0; i < NUM_FILES; i++) {
-        curl_off_t dlnow = progs[i].now;
-        curl_off_t dltotal = progs[i].total;
-
-        int pct = dltotal > 0 ? (int)(dlnow * 100 / dltotal) : 0;
-        int filled = pct * WIDTH / 100;
-
-        fprintf(stderr, "[%02d] [", i);
-        for (int j = 0; j < WIDTH; j++) fputc(j < filled ? '#' : ' ', stderr);
-        fprintf(stderr, "] %3d%%\n", pct);
-    }
-    fflush(stdout);
-}
-
-int progress_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
-                curl_off_t ultotal, curl_off_t ulnow) {
-    struct cbdata *d = p;
-    progs[d->idx].now = dlnow;
-    progs[d->idx].total = dltotal;
-
-    redraw_bars();
-
-    return 0;
-}
+// void redraw_bars() {
+//     fprintf(stderr, "\x1b[%dA", NUM_FILES);
+//     for (int i = 0; i < NUM_FILES; i++) {
+//         curl_off_t dlnow = progs[i].now;
+//         curl_off_t dltotal = progs[i].total;
+//
+//         int pct = dltotal > 0 ? (int)(dlnow * 100 / dltotal) : 0;
+//         int filled = pct * WIDTH / 100;
+//
+//         fprintf(stderr, "[%02d] [", i);
+//         for (int j = 0; j < WIDTH; j++) fputc(j < filled ? '#' : ' ',
+//         stderr); fprintf(stderr, "] %3d%%\n", pct);
+//     }
+//     fflush(stdout);
+// }
+//
+// int progress_cb(void *p, curl_off_t dltotal, curl_off_t dlnow,
+//                 curl_off_t ultotal, curl_off_t ulnow) {
+//     fprintf(stderr, "[DEBUG] progress_cb\n");
+//     struct cbdata *d = p;
+//     progs[d->idx].now = dlnow;
+//     progs[d->idx].total = dltotal;
+//
+//     redraw_bars();
+//
+//     return 0;
+// }
 
 int find_latest_run(struct tm *out) {
+    fprintf(stderr, "[DEBUG] find_latest_run\n");
     time_t now = time(NULL);
 
     for (int i = 0; i < 4; i++) {
+        set_master();
+
         time_t cand = now - (time_t)i * 6 * 3600;
         struct tm tm_cand;
         gmtime_r(&cand, &tm_cand);
@@ -97,22 +102,31 @@ int find_latest_run(struct tm *out) {
         curl_easy_setopt(master, CURLOPT_NOBODY, 1L);
         curl_easy_setopt(master, CURLOPT_FOLLOWLOCATION, 1L);
 
-        if (curl_easy_perform(master) != CURLE_OK) {
+        int res = curl_easy_perform(master);
+        if (res != CURLE_OK) {
+            fprintf(stderr,
+                    "[ERROR] curl_easy_perform(...) failed for \"%s\"\n"
+                    "        CURLcode = %d (%s)\n",
+                    url, (int)res, curl_easy_strerror(res));
+
             return 1;
         }
         long code = 0;
 
         curl_easy_getinfo(master, CURLINFO_RESPONSE_CODE, &code);
         if (code == 200) {
+            fprintf(stderr, "[DEBUG] curl_easy_getinfo\n");
             *out = tm_cand;
             return 0;
         }
     }
+    fprintf(stderr, "[ERROR] More than 24 hours stuff, line 116\n");
     return 1;
 }
 
 void generate_keys(const struct tm *run, int offset[NUM_FILES],
                    char keys[NUM_FILES][MAX_URL]) {
+    fprintf(stderr, "[DEBUG] generate_keys\n");
     const char *templates[NUM_FILES] = {
         "DATA/WRF/DET/%04d/%02d/%02d/%02d/"
         "WRFDETAR_10M_%04d%02d%02d_%02d_%03d.nc",
@@ -132,6 +146,7 @@ void generate_keys(const struct tm *run, int offset[NUM_FILES],
 }
 
 bool run_already_downloaded(struct tm *run_tm) {
+    fprintf(stderr, "[DEBUG] run_already_downloaded\n");
     char path[MAX_URL];
     snprintf(path, sizeof(path),
              RAW_DIR "WRFDETAR_10M_%04d%02d%02d_%02d_000.nc",
@@ -142,6 +157,7 @@ bool run_already_downloaded(struct tm *run_tm) {
 }
 
 int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
+    fprintf(stderr, "[DEBUG] download_parallel\n");
     CURLM *multi = curl_multi_init();
     if (!multi) return 1;
 
@@ -156,6 +172,7 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
 
         void *st_unsafe = check_time(&files[i], outpath[i]);
         if (st_unsafe == NULL) {
+            fprintf(stderr, "[DEBUG] check_time\n");
             continue;
         }
         struct stat *st = st_unsafe;
@@ -174,7 +191,7 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
 
         struct cbdata *d = malloc(sizeof *d);
         d->idx = i;
-        curl_easy_setopt(handles[i], CURLOPT_XFERINFOFUNCTION, progress_cb);
+        // curl_easy_setopt(handles[i], CURLOPT_XFERINFOFUNCTION, progress_cb);
         curl_easy_setopt(handles[i], CURLOPT_XFERINFODATA, d);
         curl_easy_setopt(handles[i], CURLOPT_NOPROGRESS, 0L);
 
@@ -187,6 +204,7 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
     multi_perform(multi);
 
     for (int i = 0; i < NUM_FILES; i++) {
+        if (!handles[i]) continue;
         if (check_response(handles[i], outpath[i], files[i])) continue;
 
         curl_multi_remove_handle(multi, handles[i]);
@@ -199,6 +217,7 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
 
 const char *construct_file_name(const char *key, char url[MAX_URL],
                                 char outpath[MAX_URL]) {
+    fprintf(stderr, "[DEBUG] *construct_file_name\n");
     const char *fn = strrchr(key, '/');
     fn = fn ? fn + 1 : key;
     snprintf(url, MAX_URL, "https://smn-ar-wrf.s3.us-west-2.amazonaws.com/%s",
@@ -209,6 +228,7 @@ const char *construct_file_name(const char *key, char url[MAX_URL],
 }
 
 void *check_time(FILE **file, char outpath[MAX_URL]) {
+    fprintf(stderr, "[DEBUG] *check_time\n");
     struct stat *st = malloc(sizeof(struct stat));
     if (stat(outpath, st) != 0) st->st_mtime = 0;
     *file = fopen(outpath, "wb");
@@ -221,6 +241,7 @@ void *check_time(FILE **file, char outpath[MAX_URL]) {
 }
 
 void multi_perform(CURLM *multi) {
+    fprintf(stderr, "[DEBUG] multi_perform\n");
     int still_running = 0;
 
     curl_multi_perform(multi, &still_running);
@@ -232,6 +253,7 @@ void multi_perform(CURLM *multi) {
 }
 
 int check_response(CURL *handle, char outpath[MAX_URL], FILE *file) {
+    fprintf(stderr, "[DEBUG] check_response\n");
     if (!handle) return 1;
     long code = 0;
     curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
@@ -248,6 +270,7 @@ int check_response(CURL *handle, char outpath[MAX_URL], FILE *file) {
 }
 
 void set_master() {
+    if (!master) return;
     curl_easy_reset(master);
 
     curl_easy_setopt(master, CURLOPT_NOBODY, 0L);
