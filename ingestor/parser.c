@@ -6,6 +6,7 @@
 double round_value(double value) { return round(value * 100.0) / 100.0; }
 
 int call_parse_and_store(const char* timestamp, double lat, double lon) {
+    fprintf(stderr, "[DEBUG] call_parse_and_store");
     char cmd[1024];
 
     snprintf(cmd, sizeof(cmd), "%s %s %.2f %.2f", PARSE_SCRIPT, timestamp, lon,

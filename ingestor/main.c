@@ -186,6 +186,7 @@ void* parser_thread(void* _) {
     }
 
     while (1) {
+        fprintf(stderr, "[DEBUG] Hell loop from parser_thread.\n");
         sqlite3_stmt* stmt = NULL;
         const char* query =
             "SELECT lat, lon, timestamp, id FROM missing_requests WHERE "

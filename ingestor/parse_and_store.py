@@ -73,7 +73,6 @@ def load_live_data(key, lat, lon):
             if lons.size == 0 or lats.size == 0:
                 continue
 
-            
             ix = point_index(lons, lon)
             iy = point_index(lats, lat)
 
