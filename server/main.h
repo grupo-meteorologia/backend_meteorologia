@@ -1,6 +1,7 @@
 /// @file
 /// @brief Presentamos el API de C para devolver los datos.
 /// Los datos sobre el clima siempre son en grados celsius
+/// \image html server_api.png
 #pragma once
 #include <sqlite3.h>
 #include <stdio.h>
