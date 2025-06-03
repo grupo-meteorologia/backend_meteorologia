@@ -9,14 +9,14 @@
 
 #include "mongoose.h"
 
-/// Puerto en el que se ejecuta el servidor.
+/// \Puerto en el que se ejecuta el servidor.
 #define PORT "8080"
 
-/// Dirección de la base de datos dentro del entorno de Docker.
+/// \Dirección de la base de datos dentro del entorno de Docker.
 #define DB_PATH "/data/dev.db"
 
-/// Datos del clima en paquete.
+/// \Datos del clima en paquete.
 const char* c_get_weather_data(double lat, double lon);
 
-/// Datos del clima por variable.
+/// \Datos del clima por variable.
 const char* c_get_weather_var(double lat, double lon, char* var);
