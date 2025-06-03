@@ -1,7 +1,3 @@
-/// @file
-/// @brief Extraemos los archivos del internet y los guardamos en la DB.
-/// Los datos sobre el clima siempre son en grados celsius
-/// \image html data_ingestion_process.png
 #include <pthread.h>
 #include <sqlite3.h>
 #include <stdio.h>
