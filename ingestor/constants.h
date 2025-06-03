@@ -1,4 +1,3 @@
-
 /// @file
 /// @brief Determinamos una serie de constantes para el ingestor.
 #pragma once
