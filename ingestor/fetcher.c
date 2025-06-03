@@ -120,7 +120,7 @@ int find_latest_run(struct tm *out) {
             return 0;
         }
     }
-    fprintf(stderr, "[ERROR] More than 24 hours stuff, line 116\n");
+    fprintf(stderr, "[ERROR] More than 24 hours, line 116\n");
     return 1;
 }
 
@@ -259,11 +259,12 @@ int check_response(CURL *handle, char outpath[MAX_URL], FILE *file) {
     curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
 
     if (code == 200) {
-        printf("Downloaded %s (HTTP %ld)\n", outpath, code);
+        fprintf(stderr, "[DEBUG] Downloaded %s (HTTP %ld)\n", outpath, code);
     } else if (code == 304) {
-        printf("%s not modified. Skipped.\n", outpath);
+        fprintf(stderr, "[DEBUG] %s not modified. Skipped.\n", outpath);
     } else {
-        printf("Downloaded %s (HTTP %ld)\n", outpath, code);
+        fprintf(stderr, "[ERROR] Código distinto a 200, %s (HTTP %ld)\n",
+                outpath, code);
     }
     fclose(file);
     return 0;

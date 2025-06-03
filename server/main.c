@@ -1,7 +1,3 @@
-/// @file
-/// @brief Presentamos el API de C para devolver los datos.
-/// Los datos sobre el clima siempre son en grados celsius
-
 #include "./main.h"
 
 #include <sqlite3.h>
@@ -69,7 +65,6 @@ int insert_into_missing(double lat, double lon, sqlite3* db) {
     return 0;
 }
 
-/// Datos del clima
 const char* c_get_weather_data(double lat, double lon) {
     static char json[512];
 
@@ -139,7 +134,6 @@ const char* c_get_weather_data(double lat, double lon) {
     return json;
 }
 
-/// Obtener Temperatura
 const char* c_get_weather_var(double lat, double lon, char* var) {
     static char json[128];
     sqlite3* db = NULL;
