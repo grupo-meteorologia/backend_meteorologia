@@ -30,8 +30,8 @@ def parse_args():
         description="Subset a NetCDF file by lon/lat box and export JSON without xarray"
     )
     p.add_argument("timestamp", help="timestamp, YYYY-MM-DD hh:mm:ss")
-    p.add_argument("lon", type=float, help="longitude")
     p.add_argument("lat", type=float, help="latitude")
+    p.add_argument("lon", type=float, help="longitude")
     return p.parse_args()
 
 def point_index(array, value):
@@ -103,7 +103,7 @@ def process_variable(varname, spec, ts, lat, lon, db):
     ncfiles = [f for f in os.listdir(RAW_DIR) if source in f]
 
     if not ncfiles:
-        print("No {source} files found.")
+        print("No {$source} files found.")
         return
 
     path = os.path.join(RAW_DIR, sorted(ncfiles)[-1])

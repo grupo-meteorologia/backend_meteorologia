@@ -9,8 +9,8 @@ int call_parse_and_store(const char* timestamp, double lat, double lon) {
     fprintf(stderr, "[DEBUG] call_parse_and_store");
     char cmd[1024];
 
-    snprintf(cmd, sizeof(cmd), "%s %s %.2f %.2f", PARSE_SCRIPT, timestamp, lon,
-             lat);
+    snprintf(cmd, sizeof(cmd), "%s \"%s\" %.2f %.2f", PARSE_SCRIPT, timestamp,
+             lat, lon);
 
     int ret = system(cmd);
     if (ret != 0) {

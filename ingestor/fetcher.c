@@ -108,7 +108,7 @@ int find_latest_run(struct tm *out) {
                     "[ERROR] curl_easy_perform(...) failed for \"%s\"\n"
                     "        CURLcode = %d (%s)\n",
                     url, (int)res, curl_easy_strerror(res));
-
+            set_master();
             return 1;
         }
         long code = 0;
@@ -117,10 +117,12 @@ int find_latest_run(struct tm *out) {
         if (code == 200) {
             fprintf(stderr, "[DEBUG] curl_easy_getinfo\n");
             *out = tm_cand;
+            set_master();
             return 0;
         }
     }
     fprintf(stderr, "[ERROR] More than 24 hours, line 116\n");
+    set_master();
     return 1;
 }
 
@@ -231,6 +233,9 @@ void *check_time(FILE **file, char outpath[MAX_URL]) {
     fprintf(stderr, "[DEBUG] *check_time\n");
     struct stat *st = malloc(sizeof(struct stat));
     if (stat(outpath, st) != 0) st->st_mtime = 0;
+
+    fprintf(stderr, "[DEBUG] check_time(): opening file → '%s'\n", outpath);
+
     *file = fopen(outpath, "wb");
     if (!*file) {
         perror("outpath");
@@ -258,16 +263,18 @@ int check_response(CURL *handle, char outpath[MAX_URL], FILE *file) {
     long code = 0;
     curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code);
 
+    fclose(file);
     if (code == 200) {
         fprintf(stderr, "[DEBUG] Downloaded %s (HTTP %ld)\n", outpath, code);
+        return 0;
     } else if (code == 304) {
         fprintf(stderr, "[DEBUG] %s not modified. Skipped.\n", outpath);
+        return 0;
     } else {
         fprintf(stderr, "[ERROR] Código distinto a 200, %s (HTTP %ld)\n",
                 outpath, code);
     }
-    fclose(file);
-    return 0;
+    return 1;
 }
 
 void set_master() {
@@ -277,6 +284,7 @@ void set_master() {
     curl_easy_setopt(master, CURLOPT_NOBODY, 0L);
     curl_easy_setopt(master, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(master, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(master, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(master, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(master, CURLOPT_SSL_SESSIONID_CACHE, 1L);
     curl_easy_setopt(master, CURLOPT_DNS_CACHE_TIMEOUT, 600L);

@@ -1,0 +1,12 @@
+HTTP/1.1 200 OK
+x-amz-id-2: +iz8yK3Cc75SQPfK4GjIOrV7W0tdEV+iwstykqhKmPRmbEGYvOO162Kd2Bj64enj08vhswTlsqUsba75D+2z1Q==
+x-amz-request-id: 6H02MFAKQMCY7VZM
+Date: Wed, 04 Jun 2025 21:37:11 GMT
+Last-Modified: Wed, 04 Jun 2025 20:06:21 GMT
+ETag: "0f72fc46061247e0a73eb0ea1d58c94c-3"
+x-amz-server-side-encryption: AES256
+Accept-Ranges: bytes
+Content-Type: application/x-netcdf
+Content-Length: 23714297
+Server: AmazonS3
+

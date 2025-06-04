@@ -38,6 +38,10 @@ int current_data_sql() {
             return 1;
         }
 
+        fprintf(stderr,
+                "[DEBUG] Updating missing_requests ready = 1 for %.2f, %.2f\n",
+                lat, lon);
+
         sqlite3_stmt* update = NULL;
         const char* query =
             "UPDATE missing_requests SET ready = 1 WHERE lat = ? AND lon = ?;";
@@ -67,8 +71,10 @@ int current_data_sql() {
 static void sqlite_update_hook(void* p_user_data, int op, const char* db_name,
                                const char* table_name, sqlite3_int64 id) {
     fprintf(stderr, "[DEBUG] sqlite_update_hook\n");
-    if (op != SQLITE_UPDATE) return;
+    if (op != SQLITE_UPDATE && op != SQLITE_INSERT) return;
     if (strcmp(table_name, "missing_requests") != 0) return;
+
+    fprintf(stderr, "[DEBUG] Entered sqlite_update_hook\n");
 
     sqlite3* db = (sqlite3*)p_user_data;
 
@@ -113,6 +119,11 @@ static void sqlite_update_hook(void* p_user_data, int op, const char* db_name,
     }
 
     sqlite3_finalize(stmt);
+
+    fprintf(stderr, "[db_hook] Parsed and %s row id=%lld\n",
+            op == SQLITE_UPDATE ? "deleted" : "retained", id);
+
+    if (op != SQLITE_UPDATE) return;
 
     sqlite3_stmt* del = NULL;
     const char* dq = "DELETE FROM missing_requests WHERE id = ?;";
