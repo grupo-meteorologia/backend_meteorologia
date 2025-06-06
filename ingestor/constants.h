@@ -19,3 +19,6 @@
 
 /// Dirección de la base de datos en el entorno de docker.
 #define DB_PATH "/data/dev.db"
+
+#define FETCHER_UPDATE 60
+#define PARSER_UPDATE 600

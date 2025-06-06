@@ -176,7 +176,7 @@ void* fetcher_thread(void* _) {
         generate_keys(&run_tm, offsets, keys);
         download_parallel(keys);
 
-        sleep(60);
+        sleep(FETCHER_UPDATE);
     }
 
     // NOT REACHED
@@ -230,7 +230,7 @@ void* parser_thread(void* _) {
             }
         }
         sqlite3_finalize(stmt);
-        sleep(600);
+        sleep(PARSER_UPDATE);
     }
     return NULL;
 }
