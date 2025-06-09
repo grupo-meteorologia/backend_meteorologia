@@ -61,5 +61,7 @@ void *check_time(FILE **file, char outpath[MAX_URL]);
 /// \ Determina si un archivo .nc fue descargado anteriormente o no.
 bool run_already_downloaded(struct tm *run_tm);
 
+int cpy_into_permanent(const char outpaths[NUM_FILES][MAX_URL]);
+
 /// \ Configura variables de master de vuelta al predeterminado.
 void set_master();

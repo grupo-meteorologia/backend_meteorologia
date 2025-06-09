@@ -1,15 +1,99 @@
 #include "./main.h"
 
+#include <cjson/cJSON.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "mongoose.h"
 
-static const char* KEYS[] = {"temperature",    "humidity", "wind_speed",
-                             "wind_direction", "pressure", "temp_max",
-                             "temp_min"};
-static const int NUM_KEYS = sizeof(KEYS) / sizeof(KEYS[0]);
+static char** KEYS = NULL;
+static int NUM_KEYS = 0;
+static time_t last_mtime = 0;
+
+time_t json_mtime() {
+    struct stat st;
+    if (stat(KEYS_JSON, &st) == 0) return st.st_mtime;
+    return (time_t)0;
+}
+
+void load_and_reload_keys() {
+    time_t mtime = json_mtime();
+    if (mtime == 0) {
+        fprintf(stderr, "Could not stat %s\n", KEYS_JSON);
+        return;
+    }
+
+    if (mtime > last_mtime) {
+        for (int i = 0; i < NUM_KEYS; i++) free(KEYS[i]);
+        free(KEYS);
+
+        KEYS = build_keys(&NUM_KEYS);
+
+        while ((KEYS = build_keys(&NUM_KEYS)) == NULL) {
+            fprintf(stderr, "Failed to reload keys. Retrying in %ds\n",
+                    RETRY_DELAY);
+            sleep(RETRY_DELAY);
+        }
+
+        last_mtime = mtime;
+        fprintf(stderr, "Reloaded %d keys (mtime %ld)\n", NUM_KEYS,
+                (long)mtime);
+    }
+}
+
+char** build_keys(int* out_n) {
+    FILE* f = fopen(KEYS_JSON, "rb");
+    if (!f) {
+        perror("fopen");
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+
+    long length = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char* buf = malloc(length + 1);
+
+    if (fread(buf, 1, length, f) != length) {
+        perror("fread");
+        fclose(f);
+        free(buf);
+        return NULL;
+    }
+
+    buf[length] = '\0';
+
+    fclose(f);
+
+    cJSON* root = cJSON_Parse(buf);
+    free(buf);
+
+    if (!root) {
+        fprintf(stderr, "JSON parse error: %s\n", cJSON_GetErrorPtr());
+        return NULL;
+    }
+
+    int n = cJSON_GetArraySize(root);
+
+    char** keys = calloc(n + 1, sizeof *keys);
+
+    cJSON* item;
+    int i = 0;
+    cJSON_ArrayForEach(item, root) {
+        cJSON* key_field = cJSON_GetObjectItem(item, "key");
+        if (cJSON_IsString(key_field))
+            keys[i++] = strdup(key_field->valuestring);
+    }
+    cJSON_Delete(root);
+
+    *out_n = n;
+
+    return keys;
+}
 
 static void send_json(struct mg_connection* c, const char* json,
                       int status_code) {
@@ -82,6 +166,7 @@ static void handle_request(struct mg_connection* c, int ev, void* ev_data) {
     }
 
     send_json(c, response, code);
+    load_and_reload_keys();
 }
 
 int insert_into_missing(double lat, double lon, sqlite3* db) {
@@ -142,8 +227,8 @@ const char* c_get_weather_data(double lat, double lon, int* code) {
 
         if (sqlite3_step(stmt) != SQLITE_ROW) {
             *code = 202;
-            fprintf(stderr, "No hay datos en db para lat %.2f y lon %.2f\n",
-                    lat, lon);
+            fprintf(stderr, "No hay datos en db para %s, lat %.2f y lon %.2f\n",
+                    var, lat, lon);
             insert_into_missing(lat, lon, db);
             sqlite3_finalize(stmt);
             continue;
@@ -220,6 +305,9 @@ const char* c_get_weather_var(double lat, double lon, char* var, int* code) {
 }
 
 int main(void) {
+    last_mtime = 0;
+    load_and_reload_keys();
+
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
     struct mg_connection* c =
@@ -237,5 +325,7 @@ int main(void) {
     }
 
     mg_mgr_free(&mgr);
+    for (int i = 0; i < NUM_KEYS; i++) free(KEYS[i]);
+    free(KEYS);
     return 0;
 }

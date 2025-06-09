@@ -1,5 +1,7 @@
 #include "fetcher.h"
 
+#include "constants.h"
+
 CURL *master = NULL;
 
 struct progress {
@@ -37,6 +39,7 @@ int fetch_current_conditions(double lat, double lon, char *out_path,
     CURLcode res = curl_easy_perform(handle);
     fclose(fp);
     curl_easy_cleanup(handle);
+    set_master();
 
     if (res != CURLE_OK) {
         fprintf(stderr, "curl_easy_perform failed: %s\n",
@@ -158,6 +161,53 @@ bool run_already_downloaded(struct tm *run_tm) {
     return access(path, F_OK) == 0;
 }
 
+int cpy_into_permanent(const char outpaths[NUM_FILES][MAX_URL]) {
+    char perm_path[MAX_URL];
+    char buf[8192];
+
+    for (int i = 0; i < NUM_FILES; i++) {
+        const char *tmp_path = outpaths[i];
+        if (tmp_path[0] == '\0') continue;
+
+        const char *base_name = strrchr(tmp_path, '/');
+        base_name = base_name ? base_name + 1 : tmp_path;
+
+        if (snprintf(perm_path, sizeof perm_path, "%s%s", RAW_DIR, base_name) >=
+            (int)sizeof perm_path) {
+            return 1;
+        }
+
+        if (rename(tmp_path, perm_path) == 0) {
+            continue;
+        }
+
+        FILE *src = fopen(tmp_path, "rb");
+        if (!src) return 1;
+        FILE *dst = fopen(perm_path, "wb");
+        if (!dst) {
+            fclose(src);
+            return 1;
+        }
+
+        size_t r;
+        while ((r = fread(buf, 1, sizeof buf, src)) > 0) {
+            if (fwrite(buf, 1, r, dst) != r) {
+                fclose(src);
+                fclose(dst);
+                return 1;
+            }
+        }
+
+        fclose(src);
+        fclose(dst);
+
+        if (remove(tmp_path) != 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
     fprintf(stderr, "[DEBUG] download_parallel\n");
     CURLM *multi = curl_multi_init();
@@ -193,7 +243,8 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
 
         struct cbdata *d = malloc(sizeof *d);
         d->idx = i;
-        // curl_easy_setopt(handles[i], CURLOPT_XFERINFOFUNCTION, progress_cb);
+        // curl_easy_setopt(handles[i], CURLOPT_XFERINFOFUNCTION,
+        // progress_cb);
         curl_easy_setopt(handles[i], CURLOPT_XFERINFODATA, d);
         curl_easy_setopt(handles[i], CURLOPT_NOPROGRESS, 0L);
 
@@ -201,7 +252,7 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
 
         progs[i].now = progs[i].total = 0;
     }
-    fflush(stdout);
+    fflush(stderr);
 
     multi_perform(multi);
 
@@ -214,6 +265,12 @@ int download_parallel(const char keys[NUM_FILES][MAX_URL]) {
     }
 
     curl_multi_cleanup(multi);
+
+    if (cpy_into_permanent(outpath) != 0) {
+        fprintf(stderr, "[ERROR] cpy_into_permanent failed\n");
+        return 1;
+    }
+
     return 0;
 }
 
@@ -224,7 +281,8 @@ const char *construct_file_name(const char *key, char url[MAX_URL],
     fn = fn ? fn + 1 : key;
     snprintf(url, MAX_URL, "https://smn-ar-wrf.s3.us-west-2.amazonaws.com/%s",
              key);
-    snprintf(outpath, MAX_URL, RAW_DIR "%s", fn);
+    snprintf(outpath, MAX_URL, "%s%s", TEMP_DIR, fn);
+    fprintf(stderr, "[DEBUG] constructed file name: %s\n", fn);
 
     return fn;
 }

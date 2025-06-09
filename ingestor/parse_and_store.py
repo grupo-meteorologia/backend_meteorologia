@@ -11,15 +11,13 @@ DB_PATH = "/data/dev.db"
 RAW_DIR = "/data/raw/netcdf/"
 LIVE_DIR = "/data/raw/live/"
 
-VAR_SPECS = {
-    "T2":         {"source": "01H", "key": "temperature",     "tolerance": 300},
-    "HR2":        {"source": "01H", "key": "humidity",        "tolerance": 1800},
-    "magViento10":{"source": "01H", "key": "wind_speed",      "tolerance": 1800},
-    "dirViento10":{"source": "01H", "key": "wind_direction",  "tolerance": 1800},
-    "PSFC":       {"source": "01H", "key": "pressure",        "tolerance": 3600},
-    "Tmax":       {"source": "24H", "key": "temp_max",        "tolerance": 43200},
-    "Tmin":       {"source": "24H", "key": "temp_min",        "tolerance": 43200},
-}
+SPEC_FILE = "/data/var_specs.json"
+try:
+    with open(SPEC_FILE, "r") as sf:
+        VAR_SPECS = json.load(sf)
+except Exception as e:
+    print(f"ERROR loading {SPEC_FILE}: {e}", file=sys.stderr)
+    sys.exit(1)
 
 LIVE_KEYS = {
     "temperature", "humidity"
@@ -32,6 +30,7 @@ def parse_args():
     p.add_argument("timestamp", help="timestamp, YYYY-MM-DD hh:mm:ss")
     p.add_argument("lat", type=float, help="latitude")
     p.add_argument("lon", type=float, help="longitude")
+    p.add_argument("--ready", action="store_true", help="if set, live data (LIVE_KEYS) can be used")
     return p.parse_args()
 
 def point_index(array, value):
@@ -53,6 +52,13 @@ def insert_weather(db, var, val, lat, lon, ts):
         "INSERT INTO weather (variable, value, lat, lon, timestamp) VALUES (?, ?, ?, ?, ?)",
         (var, val, lat, lon, ts)
     )
+
+    try:
+        db.commit()
+    except sqlite3.OperationalError as e:
+        # one last retry
+        print(f"Commit failed, retrying: {e}", file=sys.stderr)
+        db.commit()
 
 
 def load_live_data(key, lat, lon):
@@ -85,14 +91,14 @@ def load_live_data(key, lat, lon):
     return None
 
 
-def process_variable(varname, spec, ts, lat, lon, db):
+def process_variable(varname, spec, ts, lat, lon, db, ready):
     key = spec["key"]
     tol = spec["tolerance"]
 
     if weather_exists(db, key, lat, lon, ts, tol):
         return
 
-    if key in LIVE_KEYS:
+    if ready and key in LIVE_KEYS:
         val = load_live_data(key, lat, lon)
         if val is not None:
             insert_weather(db, key, val, lat, lon, ts)
@@ -101,54 +107,61 @@ def process_variable(varname, spec, ts, lat, lon, db):
 
     source = spec["source"]
     ncfiles = [f for f in os.listdir(RAW_DIR) if source in f]
-
     if not ncfiles:
-        print("No {$source} files found.")
+        print(f"no {source} files found.")
         return
 
     path = os.path.join(RAW_DIR, sorted(ncfiles)[-1])
     try:
         ds = Dataset(path, "r")
-        lons = ds.variables["lon"][:]
         lats = ds.variables["lat"][:]
-        data = ds.variables[varname][:]
+        lons = ds.variables["lon"][:]
+        arr = ds.variables[varname][:]
         ds.close()
     except Exception as e:
         print(f"Error loading {path}: {e}", file=sys.stderr)
         return
+
+    dist2 = (lats - lat)**2 + (lons - lon)**2
+    flat_idx = np.argmin(dist2)
     
-    ix = point_index(lons, lon)
-    iy = point_index(lats, lat)
+    iy, ix = np.unravel_index(flat_idx, dist2.shape)
+
+    dims = arr.shape
+    if len(dims) < 2:
+        print(f"Could not reaad values for {varname} bad dims: {dims}")
+
+    prefix = (0,) * (arr.ndim-2)
 
     try:
-        val = float(data[0][iy][ix])
-    except Exception:
-        try:
-            val = float(data[iy][ix])
-        except Exception:
-            print(f"Could not read value for {varname}")
-            return
+        val = float(arr[prefix + (iy, ix)])
+    except Exception as e:
+        print(f"Could not read value for {varname}: {e}")
+        return
 
-    insert_weather(db, spec["key"], val, lat, lon, ts)
-    print(f"Inserted {spec['key']} = {val:.2f} at ({lat}, {lon})")
+    insert_weather(db, key, val, lat, lon, ts)
+    print(f"Inserted {key} = {val:.2f} at ({lat}, {lon})")
 
 
 def main():
     args = parse_args()
     ts = args.timestamp
     lat, lon = args.lat, args.lon
+    use_live = args.ready
 
     try:
-        db = sqlite3.connect(DB_PATH)
+        db = sqlite3.connect(DB_PATH, timeout=60)
+        db.execute("PRAGMA journal_mode = WAL;")
+        db.execute("PRAGMA busy_timeout = 60000;")
     except Exception as e:
-        print(f"DB error: {e}")
+        print(f"DB error: {e}", file=sys.stderr)
         sys.exit(1)
 
     for varname, spec in VAR_SPECS.items():
-        process_variable(varname, spec, ts, lat, lon, db)
+        process_variable(varname, spec, ts, lat, lon, db, use_live)
 
-    db.commit()
     db.close()
+
 
 if __name__ == '__main__':
     main()

@@ -8,6 +8,8 @@
 /// Carpeta en la que se descarga la información de open-meteo.
 #define LIVE_DIR "/data/raw/live/"
 
+#define TEMP_DIR "/tmp/"
+
 /// Cantidad de archivos .nc subidos al servicio meteorológico nacional en AWS.
 #define NUM_FILES 3
 
@@ -16,9 +18,11 @@
 
 /// Comando para ejecutar parse_and_store.py
 #define PARSE_SCRIPT "python3 parse_and_store.py"
+#define VAR_SCRIPT "python3 build_var_specs.py"
 
 /// Dirección de la base de datos en el entorno de docker.
 #define DB_PATH "/data/dev.db"
 
 #define FETCHER_UPDATE 60
-#define PARSER_UPDATE 600
+#define PARSER_UPDATE 1
+#define DB_UPDATE 600

@@ -11,4 +11,7 @@
 
 /// Función en c que llama al script parse_and_store.py para una posición y un
 /// momento dado.
-int call_parse_and_store(const char* timestamp, double lat, double lon);
+int call_parse_and_store(const char* timestamp, double lat, double lon,
+                         int ready);
+
+int call_build_var_specs();
